@@ -1852,28 +1852,16 @@ local function updateESP()
                     canHit = false
                 end
             end)
+            pack.label.RichText = false
+            pack.label.Text = table.concat(lines, "\n")
             pack.label.TextSize = fontSize
-            pack.label.RichText = true
+            -- 可打红 / 不可打蓝（与旧版同色）
             if canHit then
-                local nameCol = (currentTargetPlr == e.plr) and "#FF2222" or "#FF4444"
-                local body = {}
-                for i = 2, #lines do body[#body + 1] = lines[i] end
-                pack.label.Text = string.format(
-                    '<font color="%s"><b>%s</b></font>\n<font color="#FFBBBB">%s</font>',
-                    nameCol,
-                    e.plr.Name,
-                    table.concat(body, "\n")
-                )
-                pack.label.TextColor3 = Color3.fromRGB(255, 50, 50)
+                pack.label.TextColor3 = (currentTargetPlr == e.plr)
+                    and Color3.fromRGB(255, 60, 60)
+                    or Color3.fromRGB(255, 80, 80)
             else
-                local body = {}
-                for i = 2, #lines do body[#body + 1] = lines[i] end
-                pack.label.Text = string.format(
-                    '<font color="#888888"><b>%s</b></font> <font color="#666666">[不可打]</font>\n<font color="#999999">%s</font>',
-                    e.plr.Name,
-                    table.concat(body, "\n")
-                )
-                pack.label.TextColor3 = Color3.fromRGB(140, 140, 140)
+                pack.label.TextColor3 = Color3.fromRGB(80, 230, 255)
             end
         end
     end
