@@ -1495,8 +1495,9 @@ end
 
 local function espMaxDistanceValue()
     local md = tonumber(_G.ESP_MaxDist) or 0
-    if md <= 0 then return math.huge end
-    return md
+    -- 0=全图：用大数而不是 math.huge（部分客户端 huge 会当 0，走近才显示）
+    if md <= 0 then return 1e6 end
+    return math.max(md, 50)
 end
 
 local function ensureEsp(plr, hrp)
@@ -1842,9 +1843,38 @@ local function updateESP()
             if _G.ESP_V3CD ~= false then lines[#lines + 1] = getRaceV3CD(e.plr) end
             if _G.ESP_Ken ~= false then lines[#lines + 1] = "见闻: " .. ken end
             lines[#lines + 1] = string.format("%.0fm", e.d)
-            pack.label.Text = table.concat(lines, "\n")
+            -- 可打判定：与自瞄一致（关PvP/安全区不可打 → 灰；可打 → 红，不靠近也红）
+            local canHit = true
+            pcall(function()
+                if not IsSilentAimEnemy(e.plr) then canHit = false end
+                if _G.ExcludePVP ~= false and IsPvpDisabled(e.plr) then canHit = false end
+                if _G.SafeZoneCheck ~= false and IsInSafeZone(e.plr) and not IsInCombatWithMe(e.plr) then
+                    canHit = false
+                end
+            end)
             pack.label.TextSize = fontSize
-            pack.label.TextColor3 = (currentTargetPlr == e.plr) and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(80, 230, 255)
+            pack.label.RichText = true
+            if canHit then
+                local nameCol = (currentTargetPlr == e.plr) and "#FF2222" or "#FF4444"
+                local body = {}
+                for i = 2, #lines do body[#body + 1] = lines[i] end
+                pack.label.Text = string.format(
+                    '<font color="%s"><b>%s</b></font>\n<font color="#FFBBBB">%s</font>',
+                    nameCol,
+                    e.plr.Name,
+                    table.concat(body, "\n")
+                )
+                pack.label.TextColor3 = Color3.fromRGB(255, 50, 50)
+            else
+                local body = {}
+                for i = 2, #lines do body[#body + 1] = lines[i] end
+                pack.label.Text = string.format(
+                    '<font color="#888888"><b>%s</b></font> <font color="#666666">[不可打]</font>\n<font color="#999999">%s</font>',
+                    e.plr.Name,
+                    table.concat(body, "\n")
+                )
+                pack.label.TextColor3 = Color3.fromRGB(140, 140, 140)
+            end
         end
     end
     for plr in pairs(espPool) do
