@@ -2567,13 +2567,44 @@ local function refreshUIKeyLabel()
 end
 
 local function loadWindUI()
+    -- 对齐 RJR：优先 request/http_request，再 HttpGet
     local urls = {
         "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
+        "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
         "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
     }
+    local function getBody(url)
+        local req = rawget(_G, "request") or rawget(_G, "http_request")
+        local syn = rawget(_G, "syn")
+        if type(syn) == "table" and type(syn.request) == "function" then req = syn.request end
+        if type(req) == "function" then
+            local ok, res = pcall(function()
+                return req({ Url = url, Method = "GET" })
+            end)
+            if ok and type(res) == "table" then
+                local b = res.Body or res.body
+                if type(b) == "string" and #b > 500 then return b end
+            elseif ok and type(res) == "string" and #res > 500 then
+                return res
+            end
+        end
+        local ok2, body = pcall(function()
+            if type(game.HttpGet) == "function" then return game:HttpGet(url) end
+            return nil
+        end)
+        if ok2 and type(body) == "string" and #body > 500 then return body end
+        return nil
+    end
     for _, url in ipairs(urls) do
-        local ok, lib = pcall(function() return loadstring(game:HttpGet(url))() end)
-        if ok and type(lib) == "table" and lib.CreateWindow then return lib end
+        local body = getBody(url)
+        if body then
+            local ok, lib = pcall(function() return loadstring(body)() end)
+            if ok and type(lib) == "table" and lib.CreateWindow then return lib end
+            if ok and type(lib) == "function" then
+                local ok3, lib2 = pcall(lib)
+                if ok3 and type(lib2) == "table" and lib2.CreateWindow then return lib2 end
+            end
+        end
     end
     return nil
 end
@@ -2596,25 +2627,39 @@ local function buildUI()
             error("WindUI 加载失败")
         end
 
+        -- UI 壳对齐 RJR（人挤人）：尺寸/透明/侧栏/开窗按钮配色
+        pcall(function()
+            if WindUI.SetTheme then WindUI:SetTheme("Dark") end
+        end)
         Window = WindUI:CreateWindow({
             Title = "BF SilentAim",
-            Icon = "crosshair",
-            Author = "SilentAim",
+            Icon = "",
+            Author = "by SilentAim",
             Folder = "BF_SilentAim_UI",
-            Size = UDim2.fromOffset(420, 420),
-            Transparent = false,
+            Size = UDim2.fromOffset(580, 460),
+            Transparent = true,
             Theme = "Dark",
-            User = {
+            Acrylic = false,
+            HideSearchBar = false,
+            SideBarWidth = 200,
+            OpenButton = {
+                Title = "BF",
+                CornerRadius = UDim.new(1, 0),
+                StrokeThickness = 3,
                 Enabled = true,
-                Anonymous = false,
-                Callback = function() end,
+                OnlyMobile = false,
+                Draggable = true,
+                OnlyIcon = false,
+                Color = ColorSequence.new(
+                    Color3.fromHex("#FF4444"),
+                    Color3.fromHex("#FF8800")
+                ),
             },
         })
         -- 禁用库自带 ToggleKey，避免与我们的 G 双触发
         pcall(function()
             if Window.SetToggleKey then Window:SetToggleKey(nil) end
         end)
-        -- 若库支持关闭回调：点 X 只藏不毁，或标记需重建
         pcall(function()
             if Window.OnClose then
                 Window:OnClose(function()
@@ -2630,13 +2675,14 @@ local function buildUI()
             end
         end)
 
-        local Tabs = { MainSec = Window:Section({ Title = "BF", Opened = true }) }
-        local MainTab = Tabs.MainSec:Tab({ Title = "自瞄", Icon = "crosshair" })
-        local SkillTab = Tabs.MainSec:Tab({ Title = "技能", Icon = "zap" })
-        local MoveTab = Tabs.MainSec:Tab({ Title = "移动", Icon = "gauge" })
-        local EspTab = Tabs.MainSec:Tab({ Title = "ESP", Icon = "eye" })
-
-        local SangTab = Tabs.MainSec:Tab({ Title = "血拳Z飞", Icon = "rocket" })
+        -- 分区：主要功能 / 设置（同 RJR 结构）
+        local SecMain = Window:Section({ Title = "主要功能", Opened = true })
+        local SecSet = Window:Section({ Title = "设置", Opened = true })
+        local MainTab = SecMain:Tab({ Title = "FOV", Icon = "pen-tool" })
+        local SkillTab = SecMain:Tab({ Title = "技能", Icon = "zap" })
+        local MoveTab = SecMain:Tab({ Title = "移动", Icon = "gauge" })
+        local EspTab = SecMain:Tab({ Title = "ESP", Icon = "eye" })
+        local SangTab = SecMain:Tab({ Title = "血拳Z飞", Icon = "rocket" })
         SangTab:Toggle({
             Title = "血拳Z推进",
             Desc = "仅第一栏武器 · 松 Z 延迟飞 · 不跟 M1",
@@ -2714,7 +2760,7 @@ local function buildUI()
             Callback = function() sangDoBoost("test", sangLook()) end,
         })
 
-        local DiamondTab = Tabs.MainSec:Tab({ Title = "钻石跳", Icon = "gem" })
+        local DiamondTab = SecMain:Tab({ Title = "钻石跳", Icon = "gem" })
         DiamondTab:Toggle({
             Title = "钻石跳 (第二栏 M1)",
             Desc = "装备钻石且 M1 时向前推进，类似血拳Z",
@@ -2766,10 +2812,9 @@ local function buildUI()
             Callback = function() diamondDoBoost("test") end,
         })
 
-        local GuitarTab = Tabs.MainSec:Tab({ Title = "吉他跳", Icon = "music" })
+        local GuitarTab = SecMain:Tab({ Title = "吉他跳", Icon = "music" })
         GuitarTab:Toggle({
             Title = "吉他跳 (第四栏/灵魂吉他 M1)",
-            Desc = "装备灵魂吉他且 M1 时向前推进，同钻石/血拳原理",
             Value = GuitarCFG.Enabled == true,
             Callback = function(v)
                 GuitarCFG.Enabled = v
@@ -2818,149 +2863,131 @@ local function buildUI()
             Callback = function() guitarDoBoost("test") end,
         })
 
-        local KeysTab = Tabs.MainSec:Tab({ Title = "按键", Icon = "keyboard" })
-        local CfgTab = Tabs.MainSec:Tab({ Title = "配置", Icon = "settings" })
+        local KeysTab = SecSet:Tab({ Title = "按键", Icon = "keyboard" })
+        local CfgTab = SecSet:Tab({ Title = "配置", Icon = "settings" })
 
-        MainTab:Toggle({
-            Title = "自瞄开关",
-            Value = Settings.Enabled == true,
-            Callback = function(v) Settings.Enabled = v _G.Enabled = v end,
-        })
-        MainTab:Toggle({
-            Title = "M1 自瞄",
-            Desc = "左键普攻是否自瞄",
-            Value = _G.M1Aim ~= false,
-            Callback = function(v) _G.M1Aim = v end,
-        })
-        MainTab:Toggle({
-            Title = "瞬步自瞄",
-            Desc = "R 瞬步是否自瞄",
-            Value = _G.SoruAim == true,
-            Callback = function(v) _G.SoruAim = v end,
-        })
-        MainTab:Toggle({
-            Title = "FOV 限制",
-            Desc = "只锁 FOV 圈内目标；关=全距离可锁（与是否画圈无关）",
-            Value = _G.UseFOV ~= false,
-            Callback = function(v) _G.UseFOV = v end,
-        })
-        MainTab:Toggle({
-            Title = "显示 FOV 圈",
-            Desc = "只控制画不画；隐藏后自瞄仍按「FOV限制」生效",
-            Value = _G.ShowFOV ~= false,
-            Callback = function(v) _G.ShowFOV = v end,
-        })
-        MainTab:Dropdown({
-            Title = "FOV 位置",
-            Values = { "跟随鼠标", "屏幕中心" },
-            Value = tostring(_G.FOVMode or "跟随鼠标"),
-            Callback = function(v)
-                _G.FOVMode = v or "跟随鼠标"
-            end,
-        })
-        MainTab:Dropdown({
-            Title = "瞄准角度",
-            Desc = "180=仅屏幕内 | 360=屏幕外也能锁",
-            Values = { "180", "360" },
-            Value = tostring(_G.AimAngleMode or "360"),
-            Callback = function(v)
-                _G.AimAngleMode = tostring(v or "360")
-            end,
-        })
-        MainTab:Paragraph({
-            Title = "FOV 提示",
-            Desc = "把 FOV 拉到 900~1500 可盖满屏；隐藏圈不影响锁定",
-        })
-        MainTab:Toggle({
-            Title = "瞄准红线",
-            Desc = "鼠标连到当前锁定目标，知道自己在打谁",
-            Value = _G.ShowAimLine ~= false,
-            Callback = function(v) _G.ShowAimLine = v end,
-        })
-        MainTab:Toggle({
-            Title = "队友过滤 (BF规则)",
-            Desc = "关=所有人都可锁 | 开=跳过同盟/默认海军互不锁",
-            Value = _G.TeamCheck ~= false,
-            Callback = function(v) _G.TeamCheck = v end,
-        })
-        MainTab:Toggle({
-            Title = "技能时面向目标",
-            Desc = "仅水平朝向 + 短窗；松键立刻停，不再技能后疯转",
-            Value = _G.FaceTargetOnSkill ~= false,
-            Callback = function(v) _G.FaceTargetOnSkill = v end,
-        })
-        MainTab:Toggle({
-            Title = "允许海军互锁",
-            Desc = "友善PVP/角斗场：海军也可瞄准海军（服务端伤害仍可能被拦在非友善区）",
-            Value = _G.AllowMarineVsMarine == true,
-            Callback = function(v) _G.AllowMarineVsMarine = v end,
-        })
-        MainTab:Toggle({
-            Title = "安全区不锁",
-            Desc = "安全区属性 + 海域坐标圈",
-            Value = _G.SafeZoneCheck ~= false,
-            Callback = function(v) _G.SafeZoneCheck = v end,
-        })
-        MainTab:Toggle({
-            Title = "PvP关闭不锁(硬拦,无交战例外)",
-            Value = _G.ExcludePVP ~= false,
-            Callback = function(v) _G.ExcludePVP = v end,
-        })
-        MainTab:Slider({
-            Title = "FOV(屏幕像素半径,不是米)",
-            Step = 1,
-            Value = { Min = 40, Max = 8000, Default = math.floor(tonumber(_G.AimFOV) or 900) },
-            Callback = function(v) _G.AimFOV = tonumber(v) or 220 end,
-        })
-        MainTab:Slider({
-            Title = "最大距离(Studs≈米)",
-            Step = 10,
-            Value = { Min = 50, Max = 100000, Default = math.floor(tonumber(_G.MaxAimDist) or 5000) },
-            Callback = function(v) _G.MaxAimDist = tonumber(v) or 800 end,
-        })
-        MainTab:Slider({
-            Title = "额外预判 x100",
-            Step = 1,
-            Value = { Min = 0, Max = 35, Default = math.floor((tonumber(_G.Prediction) or 0) * 100 + 0.5) },
-            Callback = function(v)
-                _G.Prediction = math.clamp((tonumber(v) or 0) / 100, 0, 0.35)
-            end,
-        })
-        MainTab:Dropdown({
-            Title = "瞄准部位",
-            Values = { "HumanoidRootPart", "UpperTorso", "Head" },
-            Value = tostring(_G.AimPart or "HumanoidRootPart"),
-            Callback = function(v) _G.AimPart = v end,
-        })
-        MainTab:Divider()
-        local function GetPlayerList()
-            local pl = { "(all)" }
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer then table.insert(pl, p.Name) end
-            end
-            table.sort(pl)
-            return pl
-        end
-        local PlayerDropdown = MainTab:Dropdown({
-            Title = "指定玩家",
-            Values = GetPlayerList(),
-            Value = (Settings.SelectedPlayer ~= "" and Settings.SelectedPlayer) or "(all)",
-            Callback = function(v)
-                Settings.SelectedPlayer = (v == "(all)") and "" or (v or "")
-                _G.SelectedPlayer = Settings.SelectedPlayer
-            end,
-        })
-        MainTab:Button({
-            Title = "刷新玩家列表",
-            Callback = function()
-                pcall(function()
-                    if PlayerDropdown and PlayerDropdown.Refresh then
-                        PlayerDropdown:Refresh(GetPlayerList(), true)
+        do
+            local FOVSection = MainTab
+            -- 自瞄范围（短词，对齐 RJR）
+            FOVSection:Toggle({
+                Title = "自瞄开关",
+                Value = Settings.Enabled == true,
+                Callback = function(v) Settings.Enabled = v _G.Enabled = v end,
+            })
+            FOVSection:Toggle({
+                Title = "显示 FOV 范围",
+                Value = _G.ShowFOV ~= false,
+                Callback = function(v) _G.ShowFOV = v end,
+            })
+            FOVSection:Toggle({
+                Title = "FOV 限制",
+                Value = _G.UseFOV ~= false,
+                Callback = function(v) _G.UseFOV = v end,
+            })
+            FOVSection:Dropdown({
+                Title = "FOV 位置",
+                Values = { "跟随鼠标", "屏幕中心" },
+                Value = tostring(_G.FOVMode or "跟随鼠标"),
+                Callback = function(v) _G.FOVMode = v or "跟随鼠标" end,
+            })
+            FOVSection:Slider({
+                Title = "FOV 半径大小",
+                Step = 1,
+                Value = { Min = 40, Max = 8000, Default = math.floor(tonumber(_G.AimFOV) or 900) },
+                Callback = function(v) _G.AimFOV = tonumber(v) or 220 end,
+            })
+            FOVSection:Toggle({
+                Title = "显示锁定红线",
+                Value = _G.ShowAimLine ~= false,
+                Callback = function(v) _G.ShowAimLine = v end,
+            })
+            FOVSection:Divider()
+            FOVSection:Toggle({
+                Title = "M1 R 自瞄",
+                Value = _G.M1Aim ~= false,
+                Callback = function(v) _G.M1Aim = v end,
+            })
+            FOVSection:Toggle({
+                Title = "瞬步自瞄",
+                Value = _G.SoruAim == true,
+                Callback = function(v) _G.SoruAim = v end,
+            })
+            FOVSection:Toggle({
+                Title = "技能自瞄",
+                Value = _G.FaceTargetOnSkill ~= false,
+                Callback = function(v) _G.FaceTargetOnSkill = v end,
+            })
+            FOVSection:Dropdown({
+                Title = "瞄准角度",
+                Values = { "180", "360" },
+                Value = tostring(_G.AimAngleMode or "360"),
+                Callback = function(v) _G.AimAngleMode = tostring(v or "360") end,
+            })
+            FOVSection:Toggle({
+                Title = "团队检测",
+                Value = _G.TeamCheck ~= false,
+                Callback = function(v) _G.TeamCheck = v end,
+            })
+            FOVSection:Toggle({
+                Title = "允许海军互锁",
+                Value = _G.AllowMarineVsMarine == true,
+                Callback = function(v) _G.AllowMarineVsMarine = v end,
+            })
+            FOVSection:Toggle({
+                Title = "安全区不锁",
+                Value = _G.SafeZoneCheck ~= false,
+                Callback = function(v) _G.SafeZoneCheck = v end,
+            })
+            FOVSection:Toggle({
+                Title = "排除未开启pvp",
+                Value = _G.ExcludePVP ~= false,
+                Callback = function(v) _G.ExcludePVP = v end,
+            })
+            FOVSection:Slider({
+                Title = "最大距离",
+                Step = 10,
+                Value = { Min = 50, Max = 100000, Default = math.floor(tonumber(_G.MaxAimDist) or 5000) },
+                Callback = function(v) _G.MaxAimDist = tonumber(v) or 800 end,
+            })
+            FOVSection:Slider({
+                Title = "额外预判 x100",
+                Step = 1,
+                Value = { Min = 0, Max = 35, Default = math.floor((tonumber(_G.Prediction) or 0) * 100 + 0.5) },
+                Callback = function(v)
+                    _G.Prediction = (tonumber(v) or 0) / 100
+                end,
+            })
+            FOVSection:Dropdown({
+                Title = "瞄准部位",
+                Values = { "HumanoidRootPart", "Head", "UpperTorso", "Torso", "LowerTorso" },
+                Value = tostring(_G.AimPart or "HumanoidRootPart"),
+                Callback = function(v) _G.AimPart = tostring(v or "HumanoidRootPart") end,
+            })
+            local PlayerDropdown
+            PlayerDropdown = FOVSection:Dropdown({
+                Title = "选择瞄准玩家",
+                Values = (type(GetPlayerList) == "function" and GetPlayerList()) or { "(all)" },
+                Value = (tostring(Settings.SelectedPlayer or "") ~= "" and tostring(Settings.SelectedPlayer)) or "(all)",
+                Callback = function(v)
+                    if not v or v == "(all)" then
+                        Settings.SelectedPlayer = ""
+                    else
+                        Settings.SelectedPlayer = tostring(v)
                     end
-                end)
-            end,
-        })
-        MainTab:Paragraph({ Title = "说明", Desc = "单例面板 · 防连跳 · 关窗后再按 G 会重建 · F12 清理" })
+                    _G.SelectedPlayer = Settings.SelectedPlayer
+                end,
+            })
+            FOVSection:Button({
+                Title = "刷新玩家列表",
+                Callback = function()
+                    pcall(function()
+                        if PlayerDropdown and PlayerDropdown.Refresh then
+                            PlayerDropdown:Refresh(GetPlayerList(), true)
+                        end
+                    end)
+                end,
+            })
+        end
 
         local function skillToggles(title, map, keys)
             SkillTab:Paragraph({ Title = title })
@@ -2979,8 +3006,7 @@ local function buildUI()
         skillToggles("枪", _G.BF_Aimbot_GunKeys, { "Z", "X" })
 
         MoveTab:Toggle({
-            Title = "速度 (含免控)",
-            Desc = "仅修改 WalkSpeed，不带免控",
+            Title = "加速开关",
             Value = _G.SpeedEnabled == true,
             Callback = function(v) if v then StartSpeed() else StopSpeed() end end,
         })
@@ -2996,13 +3022,13 @@ local function buildUI()
             Callback = function(v) _G.DashBoost = v ManageDashLength() end,
         })
         MoveTab:Slider({
-            Title = "DashLength",
+            Title = "冲刺距离",
             Step = 1,
             Value = { Min = 0, Max = 120, Default = math.floor(tonumber(_G.DashAdd) or 40) },
             Callback = function(v) _G.DashAdd = tonumber(v) or 40 ManageDashLength() end,
         })
         MoveTab:Slider({
-            Title = "Q 冲刺力度",
+            Title = "冲刺力度",
             Step = 5,
             Value = { Min = 80, Max = 500, Default = math.floor(tonumber(_G.DashPower) or 280) },
             Callback = function(v) _G.DashPower = tonumber(v) or 280 end,
@@ -3029,12 +3055,8 @@ local function buildUI()
                 end
             end,
         })
-        EspTab:Paragraph({
-            Title = "全图 ESP",
-            Desc = "距离 0 = 无限远；人数默认 100 盖满整服",
-        })
         EspTab:Slider({
-            Title = "ESP 最大距离(0=无限)",
+            Title = "ESP 最大距离",
             Step = 50,
             Value = { Min = 0, Max = 200000, Default = math.floor(tonumber(_G.ESP_MaxDist) or 0) },
             Callback = function(v)
@@ -3047,7 +3069,7 @@ local function buildUI()
             end,
         })
         EspTab:Slider({
-            Title = "最多显示人数",
+            Title = "ESP 人数上限",
             Step = 1,
             Value = { Min = 1, Max = 200, Default = math.floor(tonumber(_G.ESP_MaxPlayers) or 100) },
             Callback = function(v) _G.ESP_MaxPlayers = tonumber(v) or 100 end,
