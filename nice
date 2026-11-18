@@ -613,8 +613,8 @@ addConn(UIS.InputBegan:Connect(function(input)
                     stickyPart = part
                     stickyPlr = currentTargetPlr
                     stickyUntil = tick() + 0.65
+                    DropTargetIfUnsafe()
                 else
-                    -- 太近/太远：不锁地，不瞬偏
                     currentSilentAimTarget = nil
                     currentTargetPlr = nil
                 end
@@ -683,6 +683,27 @@ local function GetFOVOrigin()
     return p
 end
 
+
+local function DropTargetIfUnsafe()
+    local plr = currentTargetPlr or stickyPlr
+    if not plr then return end
+    -- 关 PvP 始终丢
+    if _G.ExcludePVP ~= false and IsPvpDisabled(plr) then
+        currentSilentAimTarget = nil
+        currentTargetPlr = nil
+        stickyPart, stickyPlr, stickyUntil = nil, nil, 0
+        faceUntil = 0
+        return
+    end
+    -- 安区：没交战才丢；打中过进安区继续锁
+    if _G.SafeZoneCheck ~= false and IsInSafeZone(plr) and not IsInCombatWithMe(plr) then
+        currentSilentAimTarget = nil
+        currentTargetPlr = nil
+        stickyPart, stickyPlr, stickyUntil = nil, nil, 0
+        faceUntil = 0
+    end
+end
+
 GetTarget = function(opts)
     opts = opts or {}
     local maxDist = tonumber(_G.MaxAimDist) or 800
@@ -710,17 +731,15 @@ GetTarget = function(opts)
         if _G.ExcludePVP ~= false and IsPvpDisabled(plr) then
             return false
         end
-        -- 安全区：默认不锁；仅短距 + 明确交战才例外
+        -- 安全区：默认不锁。
+        -- 例外：已被你打进交战表（IsInCombatWithMe）的人进安区仍可追（BF 交战进安区可杀）
+        -- 没交战、只是跑进安区 → 立刻丢锁
         if _G.SafeZoneCheck ~= false and IsInSafeZone(plr) then
-            local combatOk = IsInCombatWithMe(plr)
-            if not combatOk then
+            if not IsInCombatWithMe(plr) then
                 return false
             end
-            -- 交战例外也绝不再锁「关了PvP」的人
-            if IsPvpDisabled(plr) then
-                return false
-            end
-            if myPos and (part.Position - myPos).Magnitude > 120 then
+            -- 交战追击也限制距离，避免全图追安区深处
+            if myPos and (part.Position - myPos).Magnitude > 250 then
                 return false
             end
         end
@@ -774,11 +793,15 @@ GetTarget = function(opts)
         return nil
     end
 
-    -- 粘性：短时间保持同一目标，减少乱跳
+    -- 粘性：短时间保持同一目标；进安区 / 不可打则立刻清掉，不续锁
     if stickyPart and stickyPart.Parent and stickyPlr and now < stickyUntil then
-        if accept(stickyPlr, stickyPart) then
+        if _G.SafeZoneCheck ~= false and IsInSafeZone(stickyPlr) and not IsInCombatWithMe(stickyPlr) then
+            stickyPart, stickyPlr, stickyUntil = nil, nil, 0
+        elseif accept(stickyPlr, stickyPart) then
             currentTargetPlr = stickyPlr
             return stickyPart
+        else
+            stickyPart, stickyPlr, stickyUntil = nil, nil, 0
         end
     end
 
@@ -890,27 +913,35 @@ addConn(RunService.Heartbeat:Connect(function()
         local t = GetTarget(forceSoru and { soru = true } or nil)
         if t and t.Parent then
             currentSilentAimTarget = t
-            -- currentTargetPlr 已在 GetTarget 里更新
         else
-            -- 移动时短暂丢目标：粘住上一个玩家的部位，红线不闪
+            -- 移动时短暂丢目标：仅在仍「可打」时粘住；进安区/关PvP 不续锁
             local keep = false
             if currentTargetPlr and currentTargetPlr.Parent and not isFriendly(currentTargetPlr) then
-                local ch = currentTargetPlr.Character
-                local hum = ch and ch:FindFirstChildOfClass("Humanoid")
-                local part = ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Head"))
-                if part and hum and hum.Health > 0 then
-                    currentSilentAimTarget = part
-                    keep = true
+                local plr = currentTargetPlr
+                local unsafe = false
+                if _G.SafeZoneCheck ~= false and IsInSafeZone(plr) and not IsInCombatWithMe(plr) then unsafe = true end
+                if _G.ExcludePVP ~= false and IsPvpDisabled(plr) then unsafe = true end
+                if not unsafe then
+                    local ch = plr.Character
+                    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+                    local part = ch and (ch:FindFirstChild("HumanoidRootPart") or ch:FindFirstChild("Head"))
+                    if part and hum and hum.Health > 0 then
+                        currentSilentAimTarget = part
+                        keep = true
+                    end
                 end
             end
             if not keep then
                 currentSilentAimTarget = nil
-                -- 不立刻清 currentTargetPlr，给红线 0.2s 缓冲在 Render 里处理
+                stickyPart, stickyPlr, stickyUntil = nil, nil, 0
+                currentTargetPlr = nil
             end
         end
+        DropTargetIfUnsafe()
     else
         currentSilentAimTarget = nil
         currentTargetPlr = nil
+        stickyPart, stickyPlr, stickyUntil = nil, nil, 0
     end
 end))
 
@@ -1462,6 +1493,8 @@ local function OnCharacterAdded(char)
         pcall(function()
             if Settings.Enabled then
                 currentSilentAimTarget = GetTarget()
+                DropTargetIfUnsafe()
+        DropTargetIfUnsafe()
             end
         end)
         pcall(function()
