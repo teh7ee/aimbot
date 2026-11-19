@@ -433,6 +433,24 @@ local function bodyAimPos(part)
     return base
 end
 
+
+local function GetPlayerList()
+    local list = { "(all)" }
+    local names = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            names[#names + 1] = plr.Name
+        end
+    end
+    table.sort(names, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
+    for _, n in ipairs(names) do
+        list[#list + 1] = n
+    end
+    return list
+end
+
 local stickyPart, stickyPlr, stickyUntil = nil, nil, 0
 local GetTarget -- forward declare（InputBegan 里 R 键会用到）
 local STICKY_TIME = 0.85
@@ -3013,11 +3031,32 @@ local function buildUI()
             FOVSection:Button({
                 Title = "刷新玩家列表",
                 Callback = function()
+                    local list = GetPlayerList()
+                    local ok = false
                     pcall(function()
-                        if PlayerDropdown and PlayerDropdown.Refresh then
-                            PlayerDropdown:Refresh(GetPlayerList(), true)
+                        if not PlayerDropdown then return end
+                        if type(PlayerDropdown.Refresh) == "function" then
+                            PlayerDropdown:Refresh(list, true)
+                            ok = true
+                        elseif type(PlayerDropdown.SetValues) == "function" then
+                            PlayerDropdown:SetValues(list)
+                            ok = true
+                        elseif type(PlayerDropdown.UpdateValues) == "function" then
+                            PlayerDropdown:UpdateValues(list)
+                            ok = true
+                        elseif type(PlayerDropdown.Clear) == "function" and type(PlayerDropdown.Add) == "function" then
+                            PlayerDropdown:Clear()
+                            for _, n in ipairs(list) do PlayerDropdown:Add(n) end
+                            ok = true
                         end
                     end)
+                    if WindUI and WindUI.Notify then
+                        WindUI:Notify({
+                            Title = "玩家列表",
+                            Content = ok and ("已刷新 · " .. tostring(#list - 1) .. " 人") or "刷新失败 · 仅 (all)",
+                            Duration = 1.5,
+                        })
+                    end
                 end,
             })
         end
